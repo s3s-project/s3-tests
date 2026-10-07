@@ -1,0 +1,59 @@
+# Unofficial community build of ceph/s3-tests for the s3s E2E harness.
+#
+# The upstream commit this image is built from is recorded in .s3tests-source-ref;
+# the publish workflow passes it back in as S3TESTS_SOURCE_REF so the OCI labels
+# below state the exact source revision and patch set of every published image.
+#
+# Scope note: this image carries suite-side fixes only (fixture robustness). It must
+# not encode s3s's own gaps as skips or relaxed expectations.
+FROM python:3.12-slim
+
+ARG S3TESTS_SOURCE_REF=unknown
+ARG S3TESTS_PATCH_SET=unknown
+
+LABEL org.opencontainers.image.title="s3-tests (s3s community build)" \
+      org.opencontainers.image.description="ceph/s3-tests pinned and patched for the s3s E2E harness" \
+      org.opencontainers.image.source="https://github.com/s3s-project/s3-tests" \
+      org.opencontainers.image.revision="${S3TESTS_SOURCE_REF}" \
+      io.s3s.s3tests.patch-set="${S3TESTS_PATCH_SET}"
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    S3TEST_CONF=/conf/s3tests.conf
+
+# git fetches the pinned upstream revision and applies the patch series;
+# ca-certificates lets that fetch use HTTPS. Every dependency in requirements.txt
+# ships a cp312 manylinux wheel (checked 2026-10-07), so no compiler toolchain is
+# needed - add one back only if a future dependency has to build from source.
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /s3-tests
+
+COPY .s3tests-source-ref ./
+COPY patches/ /tmp/patches/
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Fetch the exact upstream revision, apply the patch series, then freeze the
+# dependency set: requirements.txt carries no versions, so the lock file is what
+# makes two builds of the same tag the same suite.
+RUN set -eux; \
+    ref="$(cat .s3tests-source-ref)"; \
+    git init -q .; \
+    git remote add origin https://github.com/ceph/s3-tests.git; \
+    git fetch --depth 1 -q origin "$ref"; \
+    git reset -q --hard FETCH_HEAD; \
+    for patch in /tmp/patches/*.patch; do \
+        git apply --check "$patch"; \
+        git apply "$patch"; \
+    done; \
+    pip install --no-cache-dir --retries 5 --timeout 60 -r requirements.txt; \
+    pip freeze > requirements.lock.txt; \
+    rm -rf .git /tmp/patches; \
+    chmod +x /usr/local/bin/entrypoint.sh
+
+RUN mkdir -p /out
+VOLUME ["/out", "/conf"]
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

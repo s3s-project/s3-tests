@@ -1,0 +1,22 @@
+diff --git a/s3tests/functional/__init__.py b/s3tests/functional/__init__.py
+index fbea948..cbf789f 100644
+--- a/s3tests/functional/__init__.py
++++ b/s3tests/functional/__init__.py
+@@ -99,6 +99,17 @@ def nuke_bucket(client, bucket):
+     batch_size = 128
+     max_retain_date = None
+ 
++    # A legal hold blocks DeleteObject even with BypassGovernanceRetention. A test that
++    # fails before its own cleanup would leave the hold in place, the bucket would stay
++    # non-empty, and every later test would fail in setup. Clear the holds first.
++    for objects in list_versions(client, bucket, batch_size):
++        for o in objects:
++            try:
++                client.put_object_legal_hold(Bucket=bucket, Key=o['Key'],
++                        VersionId=o['VersionId'], LegalHold={'Status': 'OFF'})
++            except ClientError:
++                pass
++
+     # list and delete objects in batches
+     for objects in list_versions(client, bucket, batch_size):
+         delete = client.delete_objects(Bucket=bucket,

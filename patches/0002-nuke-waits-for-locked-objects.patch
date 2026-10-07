@@ -1,0 +1,19 @@
+diff --git a/s3tests/functional/__init__.py b/s3tests/functional/__init__.py
+index cbf789f..34e3391 100644
+--- a/s3tests/functional/__init__.py
++++ b/s3tests/functional/__init__.py
+@@ -116,10 +116,11 @@ def nuke_bucket(client, bucket):
+                 Delete={'Objects': objects, 'Quiet': True},
+                 BypassGovernanceRetention=True)
+ 
+-        # check for object locks on 403 AccessDenied errors
++        # Probe every object the batch could not delete for a retention date. The
++        # error code is not necessarily AccessDenied: silo reports InvalidRequest for
++        # a WORM protected object, and a short COMPLIANCE retention only has to be
++        # waited out.
+         for err in delete.get('Errors', []):
+-            if err.get('Code') != 'AccessDenied':
+-                continue
+             try:
+                 res = client.get_object_retention(Bucket=bucket,
+                         Key=err['Key'], VersionId=err['VersionId'])
